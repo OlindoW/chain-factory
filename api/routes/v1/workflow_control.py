@@ -24,10 +24,30 @@ async def stop_workflow(
     redis_client: StrictRedis = Depends(get_redis_client),
     username: str = Depends(get_username),
 ):
+    """API Endpoint to stop a running workflow
+
+    Args:
+        namespace (str): Namespace
+        workflow_id (str): ID of the selected workflow
+        database (AIOEngine, optional): Database Object.
+            Defaults to Depends(get_odm_session).
+        redis_client (StrictRedis, optional): Redis Client.
+            Defaults to Depends(get_redis_client).
+        username (str, optional): Username. Defaults to Depends(get_username).
+
+    Raises:
+        HTTPException: Raises exception if workflow already stopped
+        HTTPException: Raises exception if namespace does not exists
+            or user has no access.
+
+    Returns:
+        Str: Workflow stopped
+    """
     namespace_db = await Namespace.get_namespace_db(database, namespace, username)  # noqa: E501
     if namespace_db is not None:
         workflow_status_collection = namespace_db.get_collection("workflow_status")  # noqa: E501
         if workflow_status_collection is not None:
+            # publish stop broadcast message to redis
             redis_client.publish(
                 namespace + '_' + task_control_channel_redis_key,
                 TaskControlMessage(
@@ -42,6 +62,7 @@ async def stop_workflow(
                         ]
                     })
             ):
+                # create new workflow status entry, to mark workflow as stopped
                 await workflow_status_collection.insert_one(dict(
                     workflow_id=workflow_id,
                     namespace=namespace,
@@ -61,6 +82,25 @@ async def abort_workflow(
     redis_client: StrictRedis = Depends(get_redis_client),
     username: str = Depends(get_username),
 ):
+    """API Endpoint to abort a running workflow
+
+    Args:
+        namespace (str): Namespace
+        workflow_id (str): ID of the selected workflow
+        database (AIOEngine, optional): Database Object.
+            Defaults to Depends(get_odm_session).
+        redis_client (StrictRedis, optional): Redis Client.
+            Defaults to Depends(get_redis_client).
+        username (str, optional): Username. Defaults to Depends(get_username).
+
+    Raises:
+        HTTPException: Raises exception if workflow already stopped
+        HTTPException: Raises exception if namespace does not exists
+            or user has no access.
+
+    Returns:
+        Str: Workflow aborted
+    """
     namespace_db = await Namespace.get_namespace_db(database, namespace, username)  # noqa: E501
     if namespace_db is not None:
         workflow_status_collection = namespace_db.get_collection("workflow_status")  # noqa: E501
@@ -101,6 +141,30 @@ async def restart_workflow(
     rabbitmq_url: str = Depends(get_rabbitmq_url),
     namespace_obj: Namespace = Depends(get_allowed_namespace)
 ):
+    """API endpoint to abort a workflow and start it again
+
+    Args:
+        namespace (str): Namespace
+        workflow_id (str): Workflow ID
+        database (AIOEngine, optional): Database Object.
+            Defaults to Depends(get_odm_session).
+        redis_client (StrictRedis, optional): Redis Client.
+            Defaults to Depends(get_redis_client).
+        username (str, optional): Username. Defaults to Depends(get_username).
+        rabbitmq_url (str, optional): RabbitMQ Url.
+            Defaults to Depends(get_rabbitmq_url).
+        namespace_obj (Namespace, optional): Namespace Object to check
+        if user has access to it. Defaults to Depends(get_allowed_namespace).
+
+    Raises:
+        HTTPException: Raises exception if workflow could not be restarted
+        HTTPException: Raises exception if workflow already stopped
+        HTTPException: Raises exception if namespace does not exist
+            or user has no access.
+
+    Returns:
+        Str: Workflow restarted
+    """
     namespace_db = await Namespace.get_namespace_db(database, namespace, username)  # noqa: E501
     if namespace_db is not None:
         workflow_status_collection = namespace_db.get_collection("workflow_status")  # noqa: E501
@@ -157,7 +221,15 @@ async def restart_workflow(
                             created_date=datetime.utcnow(),
                             tags=tags,
                         )
+                        # create new empty workflow
                         wf_saved: InsertOneResult = await namespace_db.get_collection(Workflow.__collection__).insert_one(dict(new_workflow))  # noqa: E501
+                        # update workflow with workflow id
+                        await namespace_db.get_collection(Workflow.__collection__).update_one(  # noqa: E501
+                            {"_id": wf_saved.inserted_id},
+                            {"$set": dict(workflow_id=str(wf_saved.inserted_id))},  # noqa: E501
+                        )
+
+                        # create new task
                         new_task: Task = Task(
                             name=name,
                             arguments=arguments,
@@ -165,22 +237,12 @@ async def restart_workflow(
                             tags=tags,
                             workflow_id=str(wf_saved.inserted_id),  # noqa: E501
                         )
-                        # update workflow with workflow id
-                        await namespace_db.get_collection(Workflow.__collection__).update_one(  # noqa: E501
-                            {"_id": wf_saved.inserted_id},
-                            {"$set": dict(workflow_id=str(wf_saved.inserted_id))},  # noqa: E501
-                        )
                         del new_task.task_id
 
-                        # new_task: Task = Task(
-                        #     name=first_task_obj.task.name,
-                        #     arguments=first_task_obj.task.arguments,
-                        #     node_names=first_task_obj.task.node_names,
-                        #     tags=first_task_obj.task.tags,
-                        # )
                         response = await rabbitmq_client.send(new_task.json())  # noqa: E501
                         if response:
                             return "Workflow restarted"
+
                 raise HTTPException(status_code=500, detail="Failed to restart workflow")  # noqa: E501
             raise HTTPException(status_code=400, detail="Workflow already stopped")  # noqa: E501
     raise HTTPException(status_code=401, detail="Namespace does not exist or you do not have access")  # noqa: E501

@@ -1,8 +1,9 @@
+from os import getenv
 from fastapi import HTTPException
 from logging import error, info, warning
 from typing import Union, Dict
 from datetime import datetime
-from redis import Redis
+from redis import Redis, ResponseError
 from cryptography.fernet import Fernet
 from amqpstorm.management import ManagementApi, ApiError
 from traceback import print_exc
@@ -11,6 +12,8 @@ from pydantic import BaseModel
 from pymongo.errors import OperationFailure
 
 from ..utils import encrypt
+
+is_dev_mode = getenv("DEV_MODE", "true").lower() == "true"
 
 
 class MongoDBCredentials(EmbeddedModel):
@@ -191,6 +194,12 @@ class RedisCredentials(EmbeddedModel):
             ],
         ):
             raise HTTPException(status_code=500, detail="failed to set redis acl")  # noqa: E501
+        # save the acl
+        if not is_dev_mode:
+            try:
+                client.acl_save()
+            except ResponseError:
+                raise HTTPException(status_code=500, detail="failed to save redis acl")  # noqa: E501
         return cls(
             key_prefix=db_name,
             username=username,

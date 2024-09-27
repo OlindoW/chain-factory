@@ -1,8 +1,17 @@
 site_name: ChainFactory Documentation
+docs_dir: gendocs/
 theme:
   name: material
   # features:
   #   - header.autohide
+markdown_extensions:
+  - admonition
+  - codehilite
+  - mkautodoc
+
+# nav:
+#   - Framework: framework.md
+#   - sources: sources/
 
 extra:
   social:

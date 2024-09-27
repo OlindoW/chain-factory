@@ -41,6 +41,8 @@ async def login(
     database: AIOEngine = Depends(get_odm_session),
     server_secret: str = Depends(get_server_secret)
 ):
+    # breakglass section
+    # --------------------------------
     breakglass_user = f"{breakglass_username}@{breakglass_domain}"
     if credentials.username == breakglass_user and credentials.password == breakglass_password:  # noqa: E501
         warning(f"breakglass login for user {breakglass_username}")
@@ -53,6 +55,7 @@ async def login(
             groups=['breakglass'],
         )
         return await create_tokens(hostname, credentials, server_secret, user_information, database, response)  # noqa: E501
+    # --------------------------------
     if credentials.username and credentials.password:
         debug(f"login request: {credentials.username}")
         idp_configs = await IdpDomainConfig.get(database, credentials.username)
@@ -73,6 +76,23 @@ async def login(
 
 
 async def create_tokens(hostname: str, credentials: LoginRequest, server_secret: str, user_information: UserInformation, database: AIOEngine, response: Response):  # noqa: E501
+    """Creates access & refresh token,
+    set them as cookies and return them additionally
+
+    Args:
+        hostname (str): Rest API Hostname
+        credentials (LoginRequest): Login POST body
+            (username, password, scopes)
+        server_secret (str): Server secret used for jwt signage and
+            jwe encryption
+        user_information (UserInformation): Result from authentication
+            API request
+        database (AIOEngine): Database session (odmantic)
+        response (Response): FastAPI Response object
+
+    Returns:
+        Dict: Access token, Refresh token
+    """
     jti = str(uuid4())
     access_token = await create_token(
         hostname,
@@ -112,7 +132,6 @@ async def create_tokens(hostname: str, credentials: LoginRequest, server_secret:
         samesite='none',
         secure=True,
     )
-    # response.body = dumps(dict(access_token=access_token, refresh_token=refresh_token)).encode('utf-8')  # noqa: E501
     return dict(access_token=access_token, refresh_token=refresh_token)  # noqa: E501
     # return response
 
@@ -175,7 +194,10 @@ def get_scopes(
     for role in roles:
         allowed_scopes.extend(role.allowed_scopes(scopes))
     not_allowed_scopes = [
-        scope for scope in scopes if scope not in allowed_scopes]
+        scope
+        for scope in scopes
+        if scope not in allowed_scopes
+    ]
     if len(not_allowed_scopes) > 0:
         scopes_text = f"scope{'s' if len(not_allowed_scopes) > 1 else ''}"
         scopes_str = ', '.join(not_allowed_scopes)

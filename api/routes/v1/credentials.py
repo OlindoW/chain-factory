@@ -44,22 +44,28 @@ async def create_credentials(
     database: AIOEngine = Depends(get_odm_session),
     username: str = Depends(get_username),
     redis_client: Redis = Depends(get_redis_client),
-    rabbitmq_management_api: ManagementApi = Depends(
-        get_rabbitmq_management_api),
+    rabbitmq_management_api: ManagementApi = Depends(get_rabbitmq_management_api),  # noqa: E501
     namespace_obj: Namespace = Depends(get_allowed_namespace)
 ) -> Union[str, dict]:
     """Create credentials for a namespace.
     Encrypt the credentials and
     return the password to retrieve the credentials.
     Return an error if the namespace does not exist
+
+    Raises:
+        HTTPException: Raises exception if credentials could not be created
+        HTTPException: Raises exception if namespace does not exist or user
+            has no access
+
+    Returns:
+        ManagementCredentials(Object)
     """
     if namespace_obj:
         info(f"namespace {namespace} found")
         credentials = await ManagementCredentials.get(database, namespace)
         if credentials:
             # delete existing credentials
-            await ManagementCredentials.delete_one(
-                database, namespace, namespace_obj.domain)
+            await ManagementCredentials.delete_one(database, namespace, namespace_obj.domain)  # noqa: E501
             info(f"existing credentials for {namespace} deleted")
         else:
             info(f"credentials for namespace {namespace} not found")
